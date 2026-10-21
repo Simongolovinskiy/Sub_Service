@@ -56,9 +56,10 @@ class RemnawavePanel(VpnPanelPort):
     async def update(self, subscription: VpnSubscription) -> PanelSubscription:
         body = {
             'id': subscription.external_id,
-            'expireAt': subscription.desired_expires_at.astimezone(UTC).isoformat().replace('+00:00', 'Z'),
             'status': subscription.desired_status,
         }
+        if subscription.desired_status != 'DISABLED' or subscription.desired_expires_at > get_current_datetime():
+            body['expireAt'] = subscription.desired_expires_at.astimezone(UTC).isoformat().replace('+00:00', 'Z')
         try:
             response = await self._client.patch('/api/users', json=body)
         except httpx.RequestError:

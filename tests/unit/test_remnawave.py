@@ -84,6 +84,36 @@ async def test_renew_patch_is_absolute_and_selects_numeric_id():
     assert result.expires_at == EXPIRES
 
 
+async def test_expiry_disable_omits_past_expiry_rejected_by_panel(monkeypatch):
+    from app.infrastructure.adapters.vpn import remnawave
+    monkeypatch.setattr(remnawave, 'get_current_datetime', lambda: EXPIRES + timedelta(seconds=1))
+    async def handler(request):
+        assert request.method == 'PATCH'
+        body = json.loads(request.content)
+        if 'expireAt' in body:
+            return httpx.Response(400, json={'errors': [{'path': ['expireAt'],
+                'message': 'Expiration date cannot be in the past', 'code': 'custom'}]})
+        assert body == {'id': 17, 'status': 'DISABLED'}
+        return httpx.Response(200, json=panel_response(status='DISABLED'))
+    async with httpx.AsyncClient(base_url='https://panel.invalid', transport=httpx.MockTransport(handler)) as client:
+        result = await remnawave.RemnawavePanel(client).update(VpnSubscription(
+            user_guid=GUID, external_id=17, desired_expires_at=EXPIRES, desired_status='DISABLED'))
+    assert result.external_id == 17
+    assert result.expires_at == EXPIRES and result.status == 'DISABLED'
+
+
+async def test_disable_with_future_target_preserves_absolute_expiry(monkeypatch):
+    from app.infrastructure.adapters.vpn import remnawave
+    monkeypatch.setattr(remnawave, 'get_current_datetime', lambda: EXPIRES - timedelta(days=1))
+    async def handler(request):
+        assert json.loads(request.content) == {'id': 17, 'status': 'DISABLED', 'expireAt': '2026-11-01T00:00:00Z'}
+        return httpx.Response(200, json=panel_response(status='DISABLED'))
+    async with httpx.AsyncClient(base_url='https://panel.invalid', transport=httpx.MockTransport(handler)) as client:
+        result = await remnawave.RemnawavePanel(client).update(VpnSubscription(
+            user_guid=GUID, external_id=17, desired_expires_at=EXPIRES, desired_status='DISABLED'))
+    assert result.expires_at == EXPIRES and result.status == 'DISABLED'
+
+
 @pytest.mark.parametrize('status', [200, 400, 401, 403, 409, 429, 500])
 async def test_create_requires_201_and_sanitizes_failures(status):
     from app.infrastructure.adapters.vpn.remnawave import RemnawavePanel

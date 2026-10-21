@@ -639,13 +639,17 @@ async def test_past_target_http_recovery_acknowledges_expired_then_disables(core
     monkeypatch.setattr(remnawave, 'get_current_datetime', lambda: now)
     await conn.execute("UPDATE outbox_events SET available_at=$1 WHERE action='renew'", now)
     statuses = []
+    remote_expiry = created.expires_at.isoformat()
     async def handler(request):
+        nonlocal remote_expiry
         body = json.loads(request.content)
         statuses.append(body['status'])
+        if body['status'] == 'ACTIVE':
+            remote_expiry = body['expireAt']
         return httpx.Response(200, json={'response': {
             'id': created.external_id, 'username': 'vpn_' + user.guid.hex,
             'description': 'asyncpytemplate:' + str(user.guid),
-            'subscriptionUrl': created.subscription_url, 'expireAt': body['expireAt'],
+            'subscriptionUrl': created.subscription_url, 'expireAt': remote_expiry,
             'status': 'EXPIRED' if body['status'] == 'ACTIVE' else 'DISABLED',
         }})
     async with httpx.AsyncClient(base_url='https://panel.invalid', transport=httpx.MockTransport(handler)) as client:
