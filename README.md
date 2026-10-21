@@ -1,46 +1,216 @@
-# AsyncPyTemplate
+# Sub Service
 
-Async Python service with FastAPI, asyncpg, yoyo migrations, APScheduler, Redis, a durable VPN outbox, and four Uvicorn workers. Requires Python 3.12+, uv, Docker, and Docker Compose v2.20+.
+Асинхронный сервис регистрации пользователей и управления VPN-подписками.
+Создаёт и продлевает подписку на семь дней, возвращает подтверждённое локальное
+состояние. Изменения передаются в панель Remnawave через transactional outbox
+в PostgreSQL.
+
+Стек: Python 3.12+, FastAPI, asyncpg, PostgreSQL 16, Redis 7, HTTPX, yoyo-migrations,
+APScheduler, Uvicorn (четыре процесса). Зависимости фиксирует `uv.lock`; используется `uv`.
+
+## Подготовка
+
+Нужны Python 3.12+, `uv`, Docker и Docker Compose v2.20+.
 
 ```sh
+cp .env.example .env
 uv sync --locked
-source .venv/bin/activate
-pytest
 ```
 
-Plain `pytest` and `make test` automatically provision a disposable PostgreSQL container through testcontainers and remove it after the session. Docker must be running. Supply `TEST_DATABASE_URL` to use an existing dedicated test database instead. Integration tests create/drop their own test schemas; do not point them at production.
+В `.env` заданы локальные значения. Для реальной панели укажите адрес, токен
+с нужными правами и `VPN_INTERNAL_SQUADS` — JSON-массив доступных UUID групп.
+Не публикуйте `.env` и токены.
+
+| Настройка | Значение по умолчанию / назначение |
+| --- | --- |
+| `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | `products_db`, `postgres`, `postgres` |
+| `POSTGRES_PORT`, `REDIS_PORT`, `APP_PORT` | `8087`, `6379`, `8000` — порты на хосте |
+| `DATABASE_CONNECTION_STRING` | `postgresql://postgres:postgres@localhost:8087/products_db` |
+| `VPN_REDIS_URL` | `redis://localhost:6379/0` |
+| `VPN_PANEL_BASE_URL` | `http://127.0.0.1:8080` |
+| `VPN_PANEL_TOKEN`, `VPN_INTERNAL_SQUADS` | Пустой токен, `[]` |
+| `APP_WORKERS`, `LOG_LEVEL` | `4`, `INFO` |
+| `VPN_OPERATION_TIMEOUT` | `2` с — синхронное ожидание операции |
+| `VPN_RETRY_INITIAL`, `VPN_RETRY_MAX` | `0.2`, `300` с — начальная и предельная задержки повтора |
+| `VPN_POLLING_SECONDS` | `300` с — период обработки очереди и сверки состояния |
+| `VPN_CACHE_TIMEOUT` | `0.2` с — ожидание Redis |
+| `VPN_NEGATIVE_CACHE_TTL` | `30` с — срок кеша отсутствующей подписки |
+| `VPN_IDEMPOTENCY_TTL` | `86400` с — срок кеша успешного результата |
+
+Сроки настраиваются и пока не согласованы окончательно. Пример: [.env.example](.env.example).
+
+## Запуск в Docker
+
+Для первого запуска всего стека, включая миграции:
 
 ```sh
-make test
-make run
-make rebuild
+docker compose up --build -d --wait
 ```
 
-`make run` starts PostgreSQL, builds the app, applies pending yoyo migrations once, then waits for the API to become ready at http://localhost:8000/healthz. Repeating it checks for new migrations. `make rebuild` refreshes base images and rebuilds without cached layers; normal `make run` preserves dependency-layer caching. PostgreSQL data survives both commands. `docker compose up --build -d --wait` also starts the stack with migrations before the API; use `make run` when applying newly added migrations to an existing stack.
+Для обычного запуска и повторного применения новых миграций используйте:
 
-Compose has local development defaults; copy `.env.example` to `.env` to customize ports and credentials before initial startup. Changing PostgreSQL credentials after its volume is initialized does not change existing database users. Host processes use the `DATABASE_CONNECTION_STRING` from `.env`; containers use the PostgreSQL service hostname automatically. Redis starts with the stack; Kafka and observability services remain optional.
+```sh
+make run
+```
 
-CI runs tests with PostgreSQL and builds the runtime image in parallel, caching uv dependencies and Docker layers. The three-minute target requires measurement on GitHub runners; it is not a guaranteed duration.
+Команда поднимает PostgreSQL, пересоздаёт и выполняет контейнер миграций,
+затем запускает приложение с зависимостями и ждёт готовности.
+`make rebuild` пересобирает образы без кеша, обновляет базовые образы и вызывает
+`make run`. Данные PostgreSQL сохраняются в томе при обоих вариантах.
+Изменение пароля в `.env` после инициализации тома не меняет пароль пользователя БД.
 
-Application, standard-library, Uvicorn supervisor/worker/access, and migration logs use Loguru's queued JSON sink on stdout, one JSON object per line. Kubernetes collectors can scrape stdout; the service does not write log files or send directly to Loki. `LOG_LEVEL` (default `INFO`) sets the shared threshold. Records include `extra.service`, `extra.request_id`, and valid OpenTelemetry trace/span IDs when available. Tracebacks omit local-variable diagnostics.
+В Compose адреса `postgres:5432` и `redis:6379` подставляются вместо локальных DSN из `.env`.
+Адрес панели должен быть доступен именно из контейнера приложения:
+`127.0.0.1` внутри него указывает на этот же контейнер.
 
-Queueing moves stdout writes to a background thread in each process; it is not coroutine stdout I/O. Application shutdown drains the queue even if container cleanup fails. Slow collectors can create backpressure; abrupt termination can lose queued logs. Uvicorn may emit its final worker shutdown message after the lifespan drain and re-raise SIGTERM before its exit hooks, so that final server message is not guaranteed. Logging queues belong to each process and are never passed to spawned workers. Where available, their synchronization primitives use the local `fork` context to avoid named semaphore leaks when Uvicorn bypasses exit hooks; Uvicorn still starts its workers with `spawn`. Run Uvicorn with `--log-config app/infrastructure/adapters/_logging/uvicorn.json` outside Docker too to route its own handlers through the same sink.
+После запуска доступны:
 
-VPN API and error/idempotency contracts are documented in [docs/VPN_API.md](docs/VPN_API.md). Routes are `POST /users`, `POST /users/{user_id}/subscription`, `GET /users/{user_id}/subscription` and `POST /users/{user_id}/subscription/extend`. Use a distinct `Idempotency-Key` for every new mutation.
+- API: `http://localhost:8000`;
+- интерактивная документация: `http://localhost:8000/api/docs`;
+- схема OpenAPI: `http://localhost:8000/api/openapi.json`;
+- проверка готовности: `http://localhost:8000/healthz`.
 
-For local execution, copy `.env.example` to `.env`, start dependencies, apply migrations, then run the production launcher:
+При изменении `APP_PORT` используйте выбранный порт вместо `8000`.
+
+## Локальный запуск Python
+
+Установите зависимости и настройте `.env`, затем поднимите PostgreSQL и Redis,
+примените миграции и запустите сервис:
 
 ```sh
 docker compose up -d --wait postgres redis
-uv run python -c "import os; from dotenv import load_dotenv; from app.infrastructure.adapters.persistence.rdb.migration_apply import db_yoyo_migration; load_dotenv(); db_yoyo_migration(os.environ['DATABASE_CONNECTION_STRING'])"
-uv run python -m app
+uv run --locked python -c "import os; from dotenv import load_dotenv; from app.infrastructure.adapters.persistence.rdb.migration_apply import db_yoyo_migration; load_dotenv(); db_yoyo_migration(os.environ['DATABASE_CONNECTION_STRING'])"
+uv run --locked python -m app
 ```
 
-`APP_WORKERS` defaults to four. On shutdown, new business HTTP requests return 503 `{"code":"SERVICE_STOPPING","message":"Service is shutting down"}` before dependency acquisition. Readiness `/healthz` returns 503; liveness `/healthz?probe=liveness` remains 200 without dependency work. The launcher grants already admitted HTTP requests 0.5 seconds and then waits for cancellation, transaction and scheduler cleanup before closing resources. Compose sets indefinite stop grace; SIGKILL and operator overrides can still interrupt it. The default five-minute scheduler performs durable retries, expiry disabling and latest-state reconciliation.
+Здесь используются адреса хоста из `.env`: PostgreSQL на `localhost:8087`
+и Redis на `localhost:6379`. После изменения портов обновите соответствующие DSN.
+Штатный запуск через `python -m app` также настраивает логи Uvicorn.
 
-Configure the panel only through `VPN_PANEL_BASE_URL`, `VPN_PANEL_TOKEN` and the JSON UUID array `VPN_INTERNAL_SQUADS`. Placeholder defaults allow startup without contacting a live panel; empty squads do not prove usable VPN access. All timing and cache settings are in `.env.example`; full synchronous operation defaults to two seconds, negative cache to 30 seconds, and successful result cache to one day. Tests use disposable PostgreSQL/Redis and a fake local panel, including SIGTERM subprocess recovery:
+## API подписок
+
+Все четыре бизнес-маршрута расположены в корне, без префикса `/api/v1`.
+
+| Метод и маршрут | Вход | Успешный результат |
+| --- | --- | --- |
+| `POST /users` | JSON с `email` и `name` | `201`: `id`, `registered_at` |
+| `POST /users/{user_id}/subscription` | Заголовок `Idempotency-Key` | `201`: подписка |
+| `GET /users/{user_id}/subscription` | UUID пользователя в пути | `200`: локальная подписка |
+| `POST /users/{user_id}/subscription/extend` | Заголовок `Idempotency-Key` | `200`: подписка |
+
+Ответ подписки содержит только `subscription_url`, `expires_at` и `status`.
+Статусы: `pending`, `active`, `disabled`. Даты передаются в UTC, ISO 8601 с `Z`.
+Создание даёт семь дней; продление устанавливает срок
+`max(текущий желаемый срок, текущее время UTC) + 7 дней`.
+Пользователь не задаёт длительность. Email очищается от пробелов по краям
+и приводится к нижнему регистру перед проверкой уникальности.
+
+Для создания и продления подписки нужен непустой `Idempotency-Key`
+длиной не более 128 символов. Для каждой новой операции выбирайте новый ключ.
+Ключ глобально связан с отпечатком операции: пользователем и действием.
+Его использование для другого пользователя или действия возвращает `409`;
+для неизвестного пользователя сначала возвращается `404`.
+Повтор возвращает первоначальный успешный снимок даже после продлений и удаления кеша Redis.
+Срок кеша не ограничивает хранение успешного результата в надёжной очереди.
+
+Ошибки имеют безопасную форму `{"code":"MACHINE_CODE","message":"Safe description"}`
+без токенов и внутренних ответов панели. Основные HTTP-статусы:
+
+- `422` — неверные поля, JSON, UUID или заголовки;
+- `404` — пользователь или локальная подписка отсутствует;
+- `409` — повтор email/подписки либо конфликт ключа идемпотентности;
+- `500` — ошибка интеграции, обязательной инвалидации кеша или внутренняя ошибка;
+- `503` — сервис останавливается и больше не принимает бизнес-запросы.
+
+`GET` читает локальное состояние и не обращается к панели.
+Для ожидающей подписки без пригодной ссылки возвращается `500 INTEGRATION_UNAVAILABLE`.
+При ожидающем продлении ранее подтверждённая ссылка может оставаться доступной.
+Подробные ответы, коды ошибок и гарантии: [docs/VPN_API.md](docs/VPN_API.md).
+
+## Надёжность и кеш
+
+Желаемое состояние и намерение обратиться к панели сохраняются атомарно в PostgreSQL.
+Пользователи хранятся в `vpn_users`, подписки — в `vpn_subscriptions`, отдельные
+операции создания, продления и отключения — в `outbox_events`.
+Вызов панели начинается после фиксации локальной транзакции. Подтверждённый результат
+и `published_at` события записываются следующей транзакцией.
+После таймаута или перезапуска создание сверяется по стабильному имени и метке
+владения; повтор продления использует уже рассчитанный абсолютный срок.
+При отказе панели операция остаётся в очереди (`outbox`); задержка повторов — от `0.2` до `300` с.
+Каждый процесс раз в `300` с сначала обрабатывает очередь, затем сверяет
+последнее желаемое состояние с панелью, включая уже синхронизированные подписки.
+Блокировки PostgreSQL согласуют работу нескольких процессов и экземпляров.
+
+Отсутствие подписки кешируется только после подтверждения в локальной БД.
+Действующий отрицательный кеш позволяет вернуть `404` без получения соединения БД.
+Ошибки чтения и заполнения Redis, включая кеш успешного результата,
+приводят к чтению PostgreSQL. При сбое обязательной инвалидации во время изменения
+возвращается `500 CACHE_UNAVAILABLE`; сохранённое намерение остаётся в очереди.
+
+## Готовность, остановка и логи
+
+`GET /healthz` проверяет инициализацию, отсутствие остановки и доступ к PostgreSQL
+с получением соединения и `SELECT 1` за общий бюджет в одну секунду.
+Ответ: `200 {"status":"ready"}` либо `503 {"status":"not_ready"}`.
+`GET /healthz?probe=liveness` проверяет жизнеспособность процесса:
+`200 {"status":"alive"}`, без работы с БД, Redis и панелью.
+Обе проверки запрещают кеширование. Отказ Redis/панели сам по себе не меняет готовность БД.
+
+При `SIGTERM`/`SIGINT` прекращается планирование фоновых заданий.
+Новые бизнес-запросы получают `503 SERVICE_STOPPING` до получения зависимостей;
+готовность возвращает `503`, жизнеспособность — `200`.
+Уже принятым HTTP-запросам даётся `0.5` с, после чего сервис ждёт завершения
+отмены, транзакций и активных фоновых заданий, затем закрывает ресурсы.
+Общая очистка не имеет жёсткого предела; в Docker задан `stop_grace_period: "-1s"`.
+`SIGKILL` или внешнее ограничение времени могут прервать очистку.
+
+Логи приложения, Uvicorn и миграций выводятся в stdout: один JSON-объект на строку.
+Общий уровень задаёт `LOG_LEVEL`; записи содержат сервис, идентификатор запроса
+и корректные идентификаторы трассировки при их наличии. Локальные переменные
+не включаются в traceback. Медленный сборщик может задерживать вывод,
+а принудительное завершение — потерять ещё не выведенные записи.
+
+## Проверки
 
 ```sh
+make test
+# либо после uv sync --locked
 uv run --locked pytest
-docker compose up --build -d --wait
 ```
+
+Нужен работающий Docker: тесты используют одноразовые PostgreSQL и Redis,
+локальную имитацию панели и сценарии восстановления после `SIGTERM`.
+`TEST_DATABASE_URL` позволяет использовать отдельную тестовую БД;
+тесты создают и удаляют свои схемы — не указывайте рабочую базу.
+Эти проверки не подтверждают работу с реальной VPN-панелью и VPN-трафиком.
+В [CI](.github/workflows/ci.yml) параллельно выполняются тесты и сборка Docker-образа;
+автоматического развёртывания нет.
+
+## Текущий статус и осознанные ограничения
+
+Реализованы четыре маршрута, хранение подписок, идемпотентность, очередь операций,
+повторы, сверка состояния, кеш, проверки готовности и корректная остановка.
+Ограничения текущего поведения:
+
+- Отключение после истечения срока может задержаться до фонового цикла
+  и дольше при недоступности панели.
+- Сверка восстанавливает последнее желаемое состояние после завершения запоздалых
+  HTTP-операций. Строгого удалённого запрета устаревших записей нет;
+  временное расхождение состояния панели возможно.
+- `GET` показывает последнее подтверждённое локальное состояние;
+  это не мгновенный снимок панели.
+- Безопасный ответ `500` может означать, что сохранённая операция завершится позже.
+  Повторяйте её с исходным ключом идемпотентности.
+
+### Предстоит проверить и доработать
+
+- [ ] Проверить реальный токен, права панели, группы и прохождение VPN-трафика.
+  Пустые настройки допускают запуск, но не подтверждают работающий VPN.
+- [ ] Согласовать окончательные сроки кеша и интервалы обработки.
+- [ ] Реализовать платёжный сценарий, ручную отмену и полную историю подписки.
+  Технический outbox пока не заменяет отдельный журнал бизнес-событий;
+  правила хранения и очистки истории ещё предстоит определить.
+- [ ] Добавить отображение времени в часовом поясе пользователя.
+
+Вспомогательные ограничитель частоты запросов и защита от каскадных сбоев
+(`circuit breaker`) не подключены к этому сценарию.
