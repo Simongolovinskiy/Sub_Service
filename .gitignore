@@ -218,3 +218,15 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project and local development files
+.pixi
+celerybeat-schedule
+.idea/
+.cursorignore
+.cursorindexingignore
+.superpowers/
+.serena/
+.DS_Store
+.env.*
+!.env.example

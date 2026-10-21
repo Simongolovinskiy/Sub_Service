@@ -1,0 +1,44 @@
+x-app: &app
+  image: asyncpytemplate:local
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+  environment:
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    DATABASE_CONNECTION_STRING: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-products_db}
+    VPN_REDIS_URL: redis://redis:6379/0
+    VPN_PANEL_BASE_URL: ${VPN_PANEL_BASE_URL:-http://127.0.0.1:8080}
+    VPN_PANEL_TOKEN: ${VPN_PANEL_TOKEN:-}
+    VPN_INTERNAL_SQUADS: ${VPN_INTERNAL_SQUADS:-[]}
+    VPN_OPERATION_TIMEOUT: ${VPN_OPERATION_TIMEOUT:-2}
+    VPN_RETRY_INITIAL: ${VPN_RETRY_INITIAL:-0.2}
+    VPN_RETRY_MAX: ${VPN_RETRY_MAX:-300}
+    VPN_POLLING_SECONDS: ${VPN_POLLING_SECONDS:-300}
+    VPN_CACHE_TIMEOUT: ${VPN_CACHE_TIMEOUT:-0.2}
+    VPN_NEGATIVE_CACHE_TTL: ${VPN_NEGATIVE_CACHE_TTL:-30}
+    VPN_IDEMPOTENCY_TTL: ${VPN_IDEMPOTENCY_TTL:-86400}
+    APP_WORKERS: ${APP_WORKERS:-4}
+    APP_PORT: 8000
+
+services:
+  migrate:
+    <<: *app
+    command: ["python", "-c", "import os; from app.infrastructure.adapters.persistence.rdb.migration_apply import db_yoyo_migration; db_yoyo_migration(os.environ['DATABASE_CONNECTION_STRING'])"]
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+  app:
+    <<: *app
+    restart: unless-stopped
+    stop_grace_period: "-1s"
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully

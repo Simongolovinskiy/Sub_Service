@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "disable_existing_loggers": false,
+  "handlers": {
+    "intercept": {
+      "()": "app.infrastructure.adapters._logging.create_intercept_handler"
+    }
+  },
+  "root": {"handlers": ["intercept"], "level": "NOTSET"},
+  "loggers": {
+    "uvicorn": {"handlers": [], "level": "NOTSET", "propagate": true},
+    "uvicorn.error": {"handlers": [], "level": "NOTSET", "propagate": true},
+    "uvicorn.access": {"handlers": [], "level": "NOTSET", "propagate": true},
+    "uvicorn.asgi": {"handlers": [], "level": "NOTSET", "propagate": true}
+  }
+}

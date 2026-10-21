@@ -1,0 +1,4 @@
+include:
+  - docker/postgresql.yaml
+  - docker/redis.yaml
+  - docker/app.yaml
