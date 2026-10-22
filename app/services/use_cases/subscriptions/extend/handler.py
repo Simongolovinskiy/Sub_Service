@@ -9,16 +9,22 @@ from app.domain.dto.vpn_user import VpnOutboxEvent, VpnSettings, VpnSubscription
 from app.domain.errors.vpn_user import PanelUnavailableError, SubscriptionNotFoundError
 from app.domain.ports.uow import UnitOfWorkPort
 from app.services.use_cases.subscriptions.extend.request import ExtendSubscriptionRequest
+from app.services.use_cases.subscriptions.extend.response import ExtendSubscriptionResponse
 from app.services.use_cases.subscriptions.mutation import SubscriptionMutation
 
 
-class ExtendSubscriptionHandler(RequestHandler[ExtendSubscriptionRequest, VpnSubscription]):
+class ExtendSubscriptionHandler(RequestHandler[ExtendSubscriptionRequest, ExtendSubscriptionResponse]):
     def __init__(self, mutation: SubscriptionMutation, settings: VpnSettings):
         self._mutation = mutation
         self._settings = settings
 
-    async def handle(self, request: ExtendSubscriptionRequest) -> VpnSubscription:
-        return await self._mutation.execute(request.user_guid, request.idempotency_key, 'renew', self._prepare)
+    async def handle(self, request: ExtendSubscriptionRequest) -> ExtendSubscriptionResponse:
+        subscription = await self._mutation.execute(request.user_guid, request.idempotency_key, 'renew', self._prepare)
+        return ExtendSubscriptionResponse(
+            subscription_url=subscription.subscription_url,
+            expires_at=subscription.expires_at,
+            status=subscription.status,
+        )
 
     async def _prepare(self, uow: UnitOfWorkPort, user_guid: UUID) -> VpnSubscription:
         current = await uow.vpn_subscriptions.get(user_guid)

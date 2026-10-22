@@ -54,7 +54,7 @@ IdempotencyKey = Annotated[str, Header(alias='Idempotency-Key', min_length=1, ma
 @inject
 async def register_user(payload: RegisterUserBody, handler: FromDishka[RegisterUserHandler]) -> RegisteredUserResponse:
     user = await handler.handle(RegisterUserRequest(payload.email, payload.name))
-    return RegisteredUserResponse(id=user.guid, registered_at=user.registered_at)
+    return RegisteredUserResponse(id=user.id, registered_at=user.registered_at)
 
 
 @router.post('/users/{user_id}/subscription', status_code=201, response_model=SubscriptionResponse)
