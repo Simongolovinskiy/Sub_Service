@@ -9,6 +9,31 @@ import pytest
 from app.application import factory
 
 
+async def test_four_use_case_handlers_resolve_without_database(monkeypatch):
+    from dishka import AsyncContainer
+
+    from app.domain.ports.uow import UnitOfWorkPort
+    from app.infrastructure.adapters.di.main import build_container
+    from app.services.use_cases.subscriptions.create.handler import CreateSubscriptionHandler
+    from app.services.use_cases.subscriptions.extend.handler import ExtendSubscriptionHandler
+    from app.services.use_cases.subscriptions.get.handler import GetSubscriptionHandler
+    from app.services.use_cases.users.register.handler import RegisterUserHandler
+
+    original = AsyncContainer.get
+
+    async def get(self, kind, *args, **kwargs):
+        assert kind not in (UnitOfWorkPort, asyncpg.Pool)
+        return await original(self, kind, *args, **kwargs)
+
+    monkeypatch.setattr(AsyncContainer, 'get', get)
+    container = build_container()
+    try:
+        for handler_type in (RegisterUserHandler, CreateSubscriptionHandler, GetSubscriptionHandler, ExtendSubscriptionHandler):
+            assert isinstance(await container.get(handler_type), handler_type)
+    finally:
+        await container.close()
+
+
 @pytest.mark.parametrize('stopping', [False, True])
 async def test_root_liveness_without_dependencies(monkeypatch, stopping):
     from dishka import make_async_container
@@ -32,28 +57,39 @@ async def test_root_liveness_without_dependencies(monkeypatch, stopping):
     ('GET', '/users/00000000-0000-0000-0000-000000000001/subscription'),
 ])
 async def test_stopping_rejects_business_requests_before_dependency_acquisition(monkeypatch, method, path):
-    from datetime import UTC, datetime
-    from uuid import UUID
-
     from dishka import AsyncContainer, Provider, Scope, make_async_container, provide
 
-    from app.services.vpn_users import VpnUserService
+    from app.services.use_cases.subscriptions.create.handler import CreateSubscriptionHandler
+    from app.services.use_cases.subscriptions.extend.handler import ExtendSubscriptionHandler
+    from app.services.use_cases.subscriptions.get.handler import GetSubscriptionHandler
+    from app.services.use_cases.users.register.handler import RegisterUserHandler
 
-    service = Mock(spec=VpnUserService)
-    service.register.return_value = SimpleNamespace(
-        guid=UUID('00000000-0000-0000-0000-000000000001'), registered_at=datetime.now(UTC),
-    )
-    subscription = SimpleNamespace(subscription_url='https://vpn.example/key', expires_at=datetime.now(UTC), status='active')
-    service.create_subscription.return_value = subscription
-    service.extend_subscription.return_value = subscription
-    service.get_subscription.return_value = subscription
+    register = Mock(spec=RegisterUserHandler)
+    create = Mock(spec=CreateSubscriptionHandler)
+    get = Mock(spec=GetSubscriptionHandler)
+    extend = Mock(spec=ExtendSubscriptionHandler)
     acquired = Mock()
 
     class Services(Provider):
         @provide(scope=Scope.REQUEST)
-        def users(self) -> VpnUserService:
+        def register_user(self) -> RegisterUserHandler:
             acquired()
-            return service
+            return register
+
+        @provide(scope=Scope.REQUEST)
+        def create_subscription(self) -> CreateSubscriptionHandler:
+            acquired()
+            return create
+
+        @provide(scope=Scope.REQUEST)
+        def get_subscription(self) -> GetSubscriptionHandler:
+            acquired()
+            return get
+
+        @provide(scope=Scope.REQUEST)
+        def extend_subscription(self) -> ExtendSubscriptionHandler:
+            acquired()
+            return extend
 
     container = make_async_container(Services())
     monkeypatch.setattr(factory, 'build_container', lambda: container)
@@ -74,10 +110,8 @@ async def test_stopping_rejects_business_requests_before_dependency_acquisition(
     assert response.json() == {'code': 'SERVICE_STOPPING', 'message': 'Service is shutting down'}
     entered.assert_not_called()
     acquired.assert_not_called()
-    service.register.assert_not_awaited()
-    service.create_subscription.assert_not_awaited()
-    service.extend_subscription.assert_not_awaited()
-    service.get_subscription.assert_not_awaited()
+    for handler in (register, create, get, extend):
+        handler.handle.assert_not_awaited()
     await container.close()
 
 

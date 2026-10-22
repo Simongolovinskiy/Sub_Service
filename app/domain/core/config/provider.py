@@ -1,7 +1,7 @@
 import os
-from typing import Protocol, Type, TypeVar, Any
+from typing import Any, Protocol, TypeVar
 
-from dotenv import load_dotenv, find_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 from app.domain.errors.adapters import SourceProviderError
 
@@ -16,7 +16,7 @@ class SourceProviderPort(Protocol):
     def get_variable(
         self,
         name: str,
-        type_: Type[T] = str,
+        type_: type[T] = str,
         default: Any = ...,
     ) -> T | Any:
         ...
@@ -30,7 +30,7 @@ class EnvSourceProvider:
     def _load_source(self) -> None:
         self._source = os.environ.copy()
 
-    def get_variable(self, name: str, type_: Type[T] = str, default: Any = ...) -> T | Any:
+    def get_variable(self, name: str, type_: type[T] = str, default: Any = ...) -> T | Any:
         raw = self._source.get(name)
 
         if raw is None:
@@ -44,19 +44,3 @@ class EnvSourceProvider:
             raise SourceProviderError(
                 f"Invalid value for {name}: {raw!r} cannot be converted to {type_.__name__}"
             ) from exc
-
-
-class LockboxSourceProvider(SourceProviderPort):
-    def _load_source(self) -> None:
-        raise NotImplementedError("Lockbox not implemented yet")
-
-    def get_variable(self, name: str, type_: Type[T] = str, default: Any = None) -> T:
-        raise NotImplementedError
-
-
-class VaultSourceProvider(SourceProviderPort):
-    def _load_source(self) -> None:
-        raise NotImplementedError("Vault not implemented yet")
-
-    def get_variable(self, name: str, type_: Type[T] = str, default: Any = None) -> T:
-        raise NotImplementedError

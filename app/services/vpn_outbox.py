@@ -1,7 +1,5 @@
 import asyncio
 import logging
-from collections.abc import Callable
-from contextlib import AbstractAsyncContextManager
 from datetime import timedelta
 from uuid import UUID
 
@@ -15,12 +13,11 @@ from app.domain.dto.vpn_user import (
     VpnSubscription,
 )
 from app.domain.errors.vpn_user import CacheUnavailableError, PanelUnavailableError
+from app.domain.ports.uow import UowFactory
 from app.domain.ports.vpn_cache import VpnCachePort
 from app.domain.ports.vpn_panel import VpnPanelPort
-from app.infrastructure.ports.uow import UnitOfWorkPort
 
 logger = logging.getLogger(__name__)
-UowFactory = Callable[[], AbstractAsyncContextManager[UnitOfWorkPort]]
 
 
 class VpnOutboxWorker:

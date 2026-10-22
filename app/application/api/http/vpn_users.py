@@ -10,13 +10,20 @@ from fastapi.routing import APIRoute
 from app.application.api.http.schemas import (
     ErrorResponse,
     RegisteredUserResponse,
-    RegisterUserRequest,
+    RegisterUserRequest as RegisterUserBody,
     SubscriptionResponse,
 )
 from app.domain.errors.base import DomainError
 from app.domain.errors.vpn_user import VpnValidationError
 from app.infrastructure.adapters._logging import get_logger
-from app.services.vpn_users import VpnUserService
+from app.services.use_cases.subscriptions.create.handler import CreateSubscriptionHandler
+from app.services.use_cases.subscriptions.create.request import CreateSubscriptionRequest
+from app.services.use_cases.subscriptions.extend.handler import ExtendSubscriptionHandler
+from app.services.use_cases.subscriptions.extend.request import ExtendSubscriptionRequest
+from app.services.use_cases.subscriptions.get.handler import GetSubscriptionHandler
+from app.services.use_cases.subscriptions.get.request import GetSubscriptionRequest
+from app.services.use_cases.users.register.handler import RegisterUserHandler
+from app.services.use_cases.users.register.request import RegisterUserRequest
 
 
 class VpnRoute(APIRoute):
@@ -45,28 +52,28 @@ IdempotencyKey = Annotated[str, Header(alias='Idempotency-Key', min_length=1, ma
 
 @router.post('/users', status_code=201, response_model=RegisteredUserResponse)
 @inject
-async def register_user(payload: RegisterUserRequest, service: FromDishka[VpnUserService]) -> RegisteredUserResponse:
-    user = await service.register(payload.email, payload.name)
+async def register_user(payload: RegisterUserBody, handler: FromDishka[RegisterUserHandler]) -> RegisteredUserResponse:
+    user = await handler.handle(RegisterUserRequest(payload.email, payload.name))
     return RegisteredUserResponse(id=user.guid, registered_at=user.registered_at)
 
 
 @router.post('/users/{user_id}/subscription', status_code=201, response_model=SubscriptionResponse)
 @inject
-async def create_subscription(user_id: UUID, service: FromDishka[VpnUserService], idempotency_key: IdempotencyKey) -> SubscriptionResponse:
+async def create_subscription(user_id: UUID, handler: FromDishka[CreateSubscriptionHandler], idempotency_key: IdempotencyKey) -> SubscriptionResponse:
     if not idempotency_key.strip():
         raise VpnValidationError()
-    return SubscriptionResponse.model_validate(await service.create_subscription(user_id, idempotency_key))
+    return SubscriptionResponse.model_validate(await handler.handle(CreateSubscriptionRequest(user_id, idempotency_key)))
 
 
 @router.get('/users/{user_id}/subscription', response_model=SubscriptionResponse)
 @inject
-async def get_subscription(user_id: UUID, service: FromDishka[VpnUserService]) -> SubscriptionResponse:
-    return SubscriptionResponse.model_validate(await service.get_subscription(user_id))
+async def get_subscription(user_id: UUID, handler: FromDishka[GetSubscriptionHandler]) -> SubscriptionResponse:
+    return SubscriptionResponse.model_validate(await handler.handle(GetSubscriptionRequest(user_id)))
 
 
 @router.post('/users/{user_id}/subscription/extend', response_model=SubscriptionResponse)
 @inject
-async def extend_subscription(user_id: UUID, service: FromDishka[VpnUserService], idempotency_key: IdempotencyKey) -> SubscriptionResponse:
+async def extend_subscription(user_id: UUID, handler: FromDishka[ExtendSubscriptionHandler], idempotency_key: IdempotencyKey) -> SubscriptionResponse:
     if not idempotency_key.strip():
         raise VpnValidationError()
-    return SubscriptionResponse.model_validate(await service.extend_subscription(user_id, idempotency_key))
+    return SubscriptionResponse.model_validate(await handler.handle(ExtendSubscriptionRequest(user_id, idempotency_key)))

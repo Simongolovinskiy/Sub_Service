@@ -87,7 +87,7 @@ async def test_root_vpn_roundtrip_replays_and_filters(api):
         unavailable = schema['paths'][path][method]['responses']['503']['content']['application/json']
         assert unavailable['schema'] == {'$ref': '#/components/schemas/ErrorResponse'}
         assert unavailable['example'] == {'code': 'SERVICE_STOPPING', 'message': 'Service is shutting down'}
-    assert (await client.get('/api/v1/health')).status_code == 200
+    assert (await client.get('/api/v1/health')).status_code == 404
 
 
 async def test_cached_absence_never_resolves_pool(api, monkeypatch):
@@ -173,12 +173,12 @@ async def test_strict_cache_invalidation_error_remains_durable(api, monkeypatch)
 
 
 async def test_unexpected_error_never_escapes_or_exposes_secret(api, monkeypatch):
-    from app.services.vpn_users import VpnUserService
+    from app.services.use_cases.users.register.handler import RegisterUserHandler
 
-    async def fail(self, email, name):
+    async def fail(self, request):
         raise RuntimeError('postgresql://private:secret@database supplied-jwt')
 
-    monkeypatch.setattr(VpnUserService, 'register', fail)
+    monkeypatch.setattr(RegisterUserHandler, 'handle', fail)
     client, *_ = api
     response = await client.post('/users', json={'email': 'user@example.com', 'name': 'User'})
     assert response.status_code == 500

@@ -8,11 +8,9 @@ import asyncpg.transaction as tx
 
 from app.domain.errors.adapters import UoWError
 from app.domain.ports.repositories.outbox import OutboxRepositoryPort
-from app.domain.ports.repositories.product import ProductRepositoryPort
-from app.domain.ports.repositories.user import UserRepositoryPort
 from app.domain.ports.repositories.vpn_subscription import VpnSubscriptionRepositoryPort
 from app.domain.ports.repositories.vpn_user import VpnUserRepositoryPort
-from app.infrastructure.ports.uow import UnitOfWorkPort
+from app.domain.ports.uow import UnitOfWorkPort
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +20,6 @@ class RDBUnitOfWork(UnitOfWorkPort):
     def __init__(
         self,
         conn: asyncpg.Connection,
-        products: ProductRepositoryPort,
-        users: UserRepositoryPort,
         vpn_users: VpnUserRepositoryPort,
         vpn_subscriptions: VpnSubscriptionRepositoryPort,
         outbox: OutboxRepositoryPort,
@@ -32,8 +28,6 @@ class RDBUnitOfWork(UnitOfWorkPort):
         self._tx: tx.Transaction | None = None
         self._in_transaction = False
 
-        self.products = products
-        self.users = users
         self.vpn_users = vpn_users
         self.vpn_subscriptions = vpn_subscriptions
         self.outbox = outbox

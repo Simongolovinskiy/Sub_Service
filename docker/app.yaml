@@ -1,11 +1,11 @@
 x-app: &app
-  image: asyncpytemplate:local
+  image: sub-service:local
   build:
     context: ..
     dockerfile: docker/Dockerfile
   environment:
     LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    DATABASE_CONNECTION_STRING: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-products_db}
+    DATABASE_CONNECTION_STRING: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-sub_service}
     VPN_REDIS_URL: redis://redis:6379/0
     VPN_PANEL_BASE_URL: ${VPN_PANEL_BASE_URL:-http://127.0.0.1:8080}
     VPN_PANEL_TOKEN: ${VPN_PANEL_TOKEN:-}

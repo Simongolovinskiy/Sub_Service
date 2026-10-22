@@ -2,11 +2,11 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
   external_labels:
-    monitor: 'asyncpy-monitor'
+    monitor: 'sub-service-monitor'
 
 scrape_configs:
-  - job_name: 'asyncpy-app'
+  - job_name: 'sub-service'
     static_configs:
       - targets: ['app:8000']
-    metrics_path: '/api/v1/metrics'
+    metrics_path: '/metrics'
     scrape_interval: 10s

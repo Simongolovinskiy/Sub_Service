@@ -1,6 +1,6 @@
 # VPN users API
 
-The four business routes are at the root. Existing `/api/v1` Product and health routes remain available. Interactive schemas are at `/api/docs` and `/api/openapi.json`.
+The four business routes are at the root. Operational endpoints are `/healthz` and `/metrics`. Interactive schemas are at `/api/docs` and `/api/openapi.json`.
 
 | Method and route | Input | Confirmed response |
 | --- | --- | --- |

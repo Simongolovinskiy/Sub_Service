@@ -3,15 +3,14 @@ from contextlib import asynccontextmanager
 
 from dishka import AsyncContainer
 from dishka.integrations.fastapi import setup_dishka
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.application.api.http.health import router as health_router
+from app.application.api.http.middleware import TracingMiddleware
 from app.application.api.http.vpn_users import router as vpn_router
-from app.application.api.v1.http.middleware import TracingMiddleware
-from app.application.api.v1.http.routers import api_v1_router
 from app.application.runtime import VpnRuntime, WorkTrackingMiddleware
 from app.domain.common.constants import SERVICE_NAME
 from app.domain.errors import vpn_user as vpn_errors
@@ -51,7 +50,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title=SERVICE_NAME,
-        description="High-performance async microservice template",
+        description="VPN subscription service",
         version="0.1.0",
         docs_url="/api/docs",
         redoc_url="/api/redoc",
@@ -88,7 +87,6 @@ def create_app() -> FastAPI:
     setup_exception_handlers(app)
 
     # Include routers
-    app.include_router(api_v1_router, prefix="/api/v1")
     app.include_router(health_router)
     app.include_router(vpn_router)
 
@@ -117,58 +115,22 @@ def setup_exception_handlers(app: FastAPI) -> None:
     for error in vpn_codes:
         app.add_exception_handler(error, vpn_error_handler)
 
-    @app.exception_handler(DomainError)
-    async def domain_error_handler(request: Request, exc: DomainError) -> JSONResponse:
-        logger.warning(
-            "Domain error occurred",
-            error_type=exc.__class__.__name__,
-            error=str(exc),
-            path=request.url.path,
-        )
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={
-                "error": exc.__class__.__name__,
-                "message": str(exc),
-                "details": getattr(exc, "details", None),
-            },
-        )
-
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
-        if request.url.path == '/users' or request.url.path.startswith('/users/'):
-            return JSONResponse(status_code=422, content={'code': 'VALIDATION_ERROR', 'message': 'Request validation failed'})
-        details = [
-            {key: error[key] for key in ("type", "loc", "msg")}
-            for error in exc.errors()
-        ]
-        logger.warning("Validation error", errors=details, path=request.url.path)
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            content={
-                "error": "ValidationError",
-                "message": "Request validation failed",
-                "details": details,
-            },
+            status_code=422,
+            content={'code': 'VALIDATION_ERROR', 'message': 'Request validation failed'},
         )
 
     @app.exception_handler(Exception)
     async def generic_error_handler(request: Request, exc: Exception) -> JSONResponse:
         if request.url.path == '/users' or request.url.path.startswith('/users/'):
             logger.error('VPN request failed', error_type=type(exc).__name__)
-            return JSONResponse(status_code=500, content={'code': 'INTERNAL_ERROR', 'message': 'An unexpected error occurred'})
-        logger.opt(exception=exc).error(
-            "Unexpected error occurred",
-            error_type=exc.__class__.__name__,
-            error=str(exc),
-            path=request.url.path,
-        )
+        else:
+            logger.opt(exception=exc).error('Unexpected error occurred', error_type=type(exc).__name__)
         return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "error": "InternalServerError",
-                "message": "An unexpected error occurred",
-            },
+            status_code=500,
+            content={'code': 'INTERNAL_ERROR', 'message': 'An unexpected error occurred'},
         )

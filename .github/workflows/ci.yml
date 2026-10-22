@@ -12,12 +12,12 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: asyncpy_test
-          POSTGRES_USER: asyncpy_test
-          POSTGRES_PASSWORD: asyncpy_test
+          POSTGRES_DB: sub_service_test
+          POSTGRES_USER: sub_service_test
+          POSTGRES_PASSWORD: sub_service_test
         ports: ["5432:5432"]
         options: >-
-          --health-cmd "pg_isready -U asyncpy_test -d asyncpy_test"
+          --health-cmd "pg_isready -U sub_service_test -d sub_service_test"
           --health-interval 1s --health-timeout 3s --health-retries 30
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +28,7 @@ jobs:
           enable-cache: true
       - run: make test
         env:
-          TEST_DATABASE_URL: postgresql://asyncpy_test:asyncpy_test@localhost:5432/asyncpy_test
+          TEST_DATABASE_URL: postgresql://sub_service_test:sub_service_test@localhost:5432/sub_service_test
 
   build:
     runs-on: ubuntu-latest
@@ -41,7 +41,7 @@ jobs:
           file: docker/Dockerfile
           push: false
           load: true
-          tags: asyncpytemplate:ci
+          tags: sub-service:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - run: docker run --rm asyncpytemplate:ci python -c "from app.application.factory import create_app; create_app()"
+      - run: docker run --rm sub-service:ci python -c "from app.application.factory import create_app; create_app()"

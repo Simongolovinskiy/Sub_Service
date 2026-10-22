@@ -6,6 +6,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from app.application.api.http.schemas import HealthResponse
+from app.infrastructure.adapters.monitoring.prometheus import metrics_handler
 
 router = APIRouter(tags=['Health'])
 
@@ -26,3 +27,8 @@ async def healthz(request: Request, probe: Literal['readiness', 'liveness'] = 'r
             ready = False
     return JSONResponse({'status': 'ready' if ready else 'not_ready'}, status_code=200 if ready else 503,
                         headers={'Cache-Control': 'no-store'})
+
+
+@router.get("/metrics", include_in_schema=False)
+async def metrics():
+    return metrics_handler()

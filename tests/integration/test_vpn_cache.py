@@ -7,6 +7,9 @@ from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 
 from app.domain.dto.vpn_user import VpnSettings, VpnSubscription
 from app.domain.errors.vpn_user import CacheUnavailableError
+from app.services.use_cases.subscriptions.create.request import CreateSubscriptionRequest
+from app.services.use_cases.subscriptions.get.request import GetSubscriptionRequest
+from app.services.use_cases.users.register.request import RegisterUserRequest
 from tests.integration.test_vpn_core import core as core
 from tests.integration.test_vpn_core import vpn_database as vpn_database
 
@@ -79,55 +82,55 @@ async def test_success_cache_retains_original_result(cache):
 
 async def test_late_database_miss_cannot_hide_successful_subscription(cache, core, vpn_database):
     from app.domain.errors.vpn_user import SubscriptionNotFoundError
-    service, worker, _ = core
-    service._cache = worker._cache = cache
-    user = await service.register('a@example.com', 'Alice')
+    handlers, worker, _ = core
+    handlers.get._cache = handlers.mutation._cache = worker._cache = cache
+    user = await handlers.register.handle(RegisterUserRequest('a@example.com', 'Alice'))
     with pytest.raises(SubscriptionNotFoundError):
-        await service.get_subscription(user.guid)
+        await handlers.get.handle(GetSubscriptionRequest(user.guid))
     generation, missing = await cache.probe(user.guid)
     assert missing
     conn, _ = vpn_database
     assert await conn.fetchval('SELECT count(*) FROM vpn_subscriptions WHERE user_guid=$1', user.guid) == 0
-    created = await service.create_subscription(user.guid, 'create-' + str(user.guid))
+    created = await handlers.create.handle(CreateSubscriptionRequest(user.guid, 'create-' + str(user.guid)))
     await cache.remember_missing(user.guid, generation)
-    assert await service.get_subscription(user.guid) == created
+    assert await handlers.get.handle(GetSubscriptionRequest(user.guid)) == created
 
 
 async def test_valid_cached_absence_does_not_query_postgres(cache, core, vpn_database):
     from app.domain.errors.vpn_user import SubscriptionNotFoundError
-    service, _, _ = core
-    service._cache = cache
-    user = await service.register('a@example.com', 'Alice')
+    handlers, _, _ = core
+    handlers.get._cache = cache
+    user = await handlers.register.handle(RegisterUserRequest('a@example.com', 'Alice'))
     with pytest.raises(SubscriptionNotFoundError):
-        await service.get_subscription(user.guid)
+        await handlers.get.handle(GetSubscriptionRequest(user.guid))
     conn, _ = vpn_database
     await conn.execute('DROP TABLE vpn_subscriptions CASCADE')
     with pytest.raises(SubscriptionNotFoundError):
-        await service.get_subscription(user.guid)
+        await handlers.get.handle(GetSubscriptionRequest(user.guid))
 
 
 async def test_get_uses_database_when_redis_read_fails(core):
     from app.infrastructure.adapters.cache.vpn import RedisVpnCache
-    service, _, _ = core
-    user = await service.register('a@example.com', 'Alice')
-    created = await service.create_subscription(user.guid, 'create-one')
+    handlers, _, _ = core
+    user = await handlers.register.handle(RegisterUserRequest('a@example.com', 'Alice'))
+    created = await handlers.create.handle(CreateSubscriptionRequest(user.guid, 'create-one'))
     failed_cache = RedisVpnCache('redis://127.0.0.1:1/0', VpnSettings(cache_timeout=0.05))
-    service._cache = failed_cache
+    handlers.get._cache = failed_cache
     try:
-        assert await service.get_subscription(user.guid) == created
+        assert await handlers.get.handle(GetSubscriptionRequest(user.guid)) == created
     finally:
         await failed_cache.aclose()
 
 
 async def test_valid_cached_absence_never_opens_uow_scope(cache, core):
     from app.domain.errors.vpn_user import SubscriptionNotFoundError
-    service, _, _ = core
-    service._cache = cache
-    user = await service.register('a@example.com', 'Alice')
+    handlers, _, _ = core
+    handlers.get._cache = cache
+    user = await handlers.register.handle(RegisterUserRequest('a@example.com', 'Alice'))
     with pytest.raises(SubscriptionNotFoundError):
-        await service.get_subscription(user.guid)
+        await handlers.get.handle(GetSubscriptionRequest(user.guid))
     def unavailable_factory():
         raise AssertionError('Cached absence opened a database scope')
-    service._uow_factory = unavailable_factory
+    handlers.get._uow_factory = unavailable_factory
     with pytest.raises(SubscriptionNotFoundError):
-        await service.get_subscription(user.guid)
+        await handlers.get.handle(GetSubscriptionRequest(user.guid))

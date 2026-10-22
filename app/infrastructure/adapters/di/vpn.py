@@ -10,9 +10,13 @@ from app.domain.ports.vpn_panel import VpnPanelPort
 from app.infrastructure.adapters.cache.vpn import RedisVpnCache
 from app.infrastructure.adapters.vpn.remnawave import RemnawavePanel
 from app.infrastructure.adapters.vpn.settings import VpnRuntimeSettings
-from app.infrastructure.ports.uow import UnitOfWorkPort
-from app.services.vpn_outbox import UowFactory, VpnOutboxWorker
-from app.services.vpn_users import VpnUserService
+from app.domain.ports.uow import UnitOfWorkPort, UowFactory
+from app.services.vpn_outbox import VpnOutboxWorker
+from app.services.use_cases.subscriptions.create.handler import CreateSubscriptionHandler
+from app.services.use_cases.subscriptions.extend.handler import ExtendSubscriptionHandler
+from app.services.use_cases.subscriptions.get.handler import GetSubscriptionHandler
+from app.services.use_cases.subscriptions.mutation import SubscriptionMutation
+from app.services.use_cases.users.register.handler import RegisterUserHandler
 
 
 class VpnProvider(Provider):
@@ -54,4 +58,8 @@ class VpnProvider(Provider):
         return factory
 
     worker = provide(VpnOutboxWorker)
-    service = provide(VpnUserService)
+    mutation = provide(SubscriptionMutation)
+    register_user = provide(RegisterUserHandler)
+    create_subscription = provide(CreateSubscriptionHandler)
+    get_subscription = provide(GetSubscriptionHandler)
+    extend_subscription = provide(ExtendSubscriptionHandler)
